@@ -1,232 +1,253 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>文档合并为 PDF 前后端版</title>
-  <link rel="stylesheet" href="/assets/style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文档合并PDF工具 - 在线免费</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 核心依赖库：PDF处理、Word转PDF、图片处理 -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <script src="https://unpkg.com/mammoth@1.4.18/mammoth.browser.min.js"></script>
+    <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/pdfjs-dist@3.4.120/build/pdf.min.js"></script>
+    
+    <style>
+        .drag-active { border-color: #2563eb !important; background-color: #eff6ff !important; }
+        .file-item { transition: all 0.2s ease; }
+        .file-item:hover { transform: translateX(-2px); }
+        /* 隐藏原生文件上传按钮 */
+        input[type="file"] { display: none; }
+    </style>
 </head>
-<body>
-  <main class="wrap">
-    <section class="hero card">
-      <h1>文档合并为 PDF</h1>
-      <p class="desc">
-        前端负责上传与排序，后端负责把 PDF、图片、TXT、Markdown、DOC、DOCX 转成 PDF 后再合并。
-        <strong>.doc 老式 Word 通过服务器端 LibreOffice 无界面转换，支持直接合并。</strong>
-      </p>
-      <div class="tags">
-        <span>支持 .doc</span>
-        <span>支持 .docx</span>
-        <span>支持 PDF 与图片</span>
-        <span>支持 TXT 与 Markdown</span>
-      </div>
-    </section>
-
-    <section class="grid">
-      <div class="card">
-        <label class="dropzone" id="dropzone">
-          <input id="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.txt,.md,.doc,.docx" />
-          <h2>拖拽文件到这里，或点击选择文件</h2>
-          <p>上传后可通过上移、下移调整合并顺序。后台会严格按当前顺序合并。</p>
-        </label>
-
-        <div class="toolbar">
-          <button id="chooseBtn" class="primary">选择文件</button>
-          <button id="mergeBtn" class="secondary">上传并合并</button>
-          <button id="clearBtn" class="ghost">清空列表</button>
-          <button id="healthBtn" class="ghost">检查后端环境</button>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto px-4 py-10">
+        <!-- 头部 -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">📄 在线文档合并PDF工具</h1>
+            <p class="text-gray-600">支持Word/WPS/PDF/图片 合并为一个PDF，本地处理，安全免费</p>
         </div>
 
-        <pre id="status" class="status">等待添加文件。</pre>
-      </div>
-
-      <div class="card">
-        <div class="panel-head">
-          <h3>合并顺序</h3>
-          <span id="summary">共 0 个文件</span>
+        <!-- 上传区域 -->
+        <div id="dropArea" class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-white mb-6 cursor-pointer transition-all">
+            <p class="text-gray-600 mb-4">点击上传 或 拖拽文件到此处</p>
+            <label for="fileInput" class="bg-blue-600 text-white px-5 py-2 rounded-lg inline-block hover:bg-blue-700 transition-all">
+                选择文件
+            </label>
+            <input id="fileInput" type="file" multiple accept=".pdf,.docx,.jpg,.jpeg,.png,.webp">
+            <p class="text-xs text-gray-500 mt-3">支持：docx(Word/WPS)、PDF、jpg、png、webp</p>
         </div>
-        <div id="list" class="file-list empty">当前还没有文件。</div>
-      </div>
-    </section>
-  </main>
 
-  <script>
-    const state = { files: [] };
-
-    const fileInput = document.getElementById('fileInput');
-    const chooseBtn = document.getElementById('chooseBtn');
-    const mergeBtn = document.getElementById('mergeBtn');
-    const clearBtn = document.getElementById('clearBtn');
-    const healthBtn = document.getElementById('healthBtn');
-    const dropzone = document.getElementById('dropzone');
-    const list = document.getElementById('list');
-    const summary = document.getElementById('summary');
-    const statusEl = document.getElementById('status');
-
-    chooseBtn.addEventListener('click', () => fileInput.click());
-    clearBtn.addEventListener('click', clearFiles);
-    mergeBtn.addEventListener('click', mergeFiles);
-    healthBtn.addEventListener('click', checkHealth);
-    fileInput.addEventListener('change', (e) => addFiles(e.target.files));
-
-    ['dragenter', 'dragover'].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.add('dragover');
-      });
-    });
-
-    ['dragleave', 'drop'].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        dropzone.classList.remove('dragover');
-      });
-    });
-
-    dropzone.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
-
-    function setStatus(text, isError = false) {
-      statusEl.textContent = text;
-      statusEl.style.color = isError ? '#b91c1c' : '#475569';
-    }
-
-    function addFiles(fileListLike) {
-      const files = Array.from(fileListLike || []);
-      if (!files.length) return;
-      state.files.push(...files);
-      render();
-      fileInput.value = '';
-      setStatus(`已添加 ${files.length} 个文件。当前共 ${state.files.length} 个文件。`);
-    }
-
-    function clearFiles() {
-      state.files = [];
-      render();
-      setStatus('已清空文件列表。');
-    }
-
-    function render() {
-      summary.textContent = `共 ${state.files.length} 个文件`;
-      if (!state.files.length) {
-        list.className = 'file-list empty';
-        list.innerHTML = '当前还没有文件。';
-        return;
-      }
-
-      list.className = 'file-list';
-      list.innerHTML = state.files.map((file, index) => `
-        <div class="file-item">
-          <div>
-            <div class="file-name">${index + 1}. ${escapeHtml(file.name)}</div>
-            <div class="file-meta">${escapeHtml(file.type || detectByName(file.name) || '未知类型')} · ${(file.size / 1024).toFixed(1)} KB</div>
-          </div>
-          <div class="actions">
-            <button onclick="moveUp(${index})">上移</button>
-            <button onclick="moveDown(${index})">下移</button>
-            <button onclick="removeAt(${index})">删除</button>
-          </div>
+        <!-- 文件列表 -->
+        <div id="fileList" class="bg-white rounded-lg shadow-sm p-4 mb-6 hidden">
+            <h3 class="font-semibold text-gray-700 mb-3">已选择文件（拖拽排序）</h3>
+            <div id="fileItems" class="space-y-2" draggable="true"></div>
         </div>
-      `).join('');
-    }
 
-    function detectByName(name) {
-      const lower = String(name).toLowerCase();
-      if (lower.endsWith('.doc')) return 'application/msword';
-      if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      if (lower.endsWith('.pdf')) return 'application/pdf';
-      if (lower.endsWith('.txt')) return 'text/plain';
-      if (lower.endsWith('.md')) return 'text/markdown';
-      if (lower.match(/\.(png|jpg|jpeg|webp|gif|bmp|tif|tiff)$/)) return 'image/*';
-      return '';
-    }
+        <!-- 操作按钮 -->
+        <div class="flex gap-3 justify-center mb-8">
+            <button id="mergeBtn" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all" disabled>
+                开始合并为PDF
+            </button>
+            <button id="clearBtn" class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600 transition-all">
+                清空所有文件
+            </button>
+        </div>
 
-    function escapeHtml(str) {
-      return String(str).replace(/[&<>'"]/g, (c) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;'
-      }[c]));
-    }
+        <!-- 进度与结果 -->
+        <div id="progress" class="text-center text-blue-600 font-medium hidden">正在处理文件，请稍候...</div>
+        <div id="result" class="text-center text-green-600 font-medium hidden mt-4">
+            ✅ 处理完成！<br>
+            <button id="downloadBtn" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">下载合并后的PDF</button>
+        </div>
+    </div>
 
-    window.moveUp = function(index) {
-      if (index <= 0) return;
-      [state.files[index - 1], state.files[index]] = [state.files[index], state.files[index - 1]];
-      render();
-    }
+    <script>
+        // 初始化变量
+        const { PDFDocument, StandardFonts, rgb } = PDFLib;
+        const { jsPDF } = jspdf;
+        let fileList = [];
+        let finalPdfBytes = null;
 
-    window.moveDown = function(index) {
-      if (index >= state.files.length - 1) return;
-      [state.files[index], state.files[index + 1]] = [state.files[index + 1], state.files[index]];
-      render();
-    }
+        // DOM元素
+        const dropArea = document.getElementById('dropArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileListEl = document.getElementById('fileList');
+        const fileItemsEl = document.getElementById('fileItems');
+        const mergeBtn = document.getElementById('mergeBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const progress = document.getElementById('progress');
+        const result = document.getElementById('result');
+        const downloadBtn = document.getElementById('downloadBtn');
 
-    window.removeAt = function(index) {
-      state.files.splice(index, 1);
-      render();
-      setStatus(`已删除第 ${index + 1} 个文件。`);
-    }
-
-    async function mergeFiles() {
-      if (!state.files.length) {
-        setStatus('请先添加文件。', true);
-        return;
-      }
-
-      mergeBtn.disabled = true;
-      mergeBtn.textContent = '正在上传与合并...';
-      setStatus('正在上传文件并请求服务器合并，请稍候...');
-
-      try {
-        const formData = new FormData();
-        state.files.forEach((file) => formData.append('files', file, file.name));
-
-        const response = await fetch('/api/merge', {
-          method: 'POST',
-          body: formData
+        // 拖拽上传
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
+            dropArea.addEventListener(event, (e) => e.preventDefault());
+        });
+        dropArea.addEventListener('dragover', () => dropArea.classList.add('drag-active'));
+        dropArea.addEventListener('dragleave', () => dropArea.classList.remove('drag-active'));
+        dropArea.addEventListener('drop', (e) => {
+            dropArea.classList.remove('drag-active');
+            handleFiles(e.dataTransfer.files);
         });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || `请求失败，状态码 ${response.status}`);
+        // 文件选择
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        // 处理上传文件
+        function handleFiles(files) {
+            if (!files.length) return;
+            const validFiles = Array.from(files).filter(file => {
+                const ext = file.name.split('.').pop().toLowerCase();
+                return ['pdf', 'docx', 'jpg', 'jpeg', 'png', 'webp'].includes(ext);
+            });
+            
+            fileList = [...fileList, ...validFiles];
+            renderFileList();
+            mergeBtn.disabled = fileList.length === 0;
         }
 
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'merged.pdf';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        // 渲染文件列表
+        function renderFileList() {
+            if (fileList.length === 0) {
+                fileListEl.classList.add('hidden');
+                return;
+            }
+            fileListEl.classList.remove('hidden');
+            fileItemsEl.innerHTML = '';
 
-        setStatus('合并完成，PDF 已开始下载。');
-      } catch (error) {
-        console.error(error);
-        setStatus(`合并失败：${error.message || error}`, true);
-      } finally {
-        mergeBtn.disabled = false;
-        mergeBtn.textContent = '上传并合并';
-      }
-    }
+            fileList.forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-item flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200';
+                item.innerHTML = `
+                    <span>${index + 1}. ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)</span>
+                    <button data-index="${index}" class="delete-btn text-red-500 text-sm">删除</button>
+                `;
+                fileItemsEl.appendChild(item);
+            });
 
-    async function checkHealth() {
-      try {
-        const response = await fetch('/api/health');
-        const data = await response.json();
-        if (data.libreoffice_found) {
-          setStatus(`后端环境正常。已检测到 LibreOffice：${data.soffice_path}`);
-        } else {
-          setStatus('后端已启动，但未检测到 LibreOffice。DOC 和 DOCX 转 PDF 会失败，请先安装 LibreOffice。', true);
+            // 删除文件
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const index = e.target.dataset.index;
+                    fileList.splice(index, 1);
+                    renderFileList();
+                    mergeBtn.disabled = fileList.length === 0;
+                });
+            });
         }
-      } catch (error) {
-        setStatus(`环境检查失败：${error.message || error}`, true);
-      }
-    }
-  </script>
+
+        // 清空文件
+        clearBtn.addEventListener('click', () => {
+            fileList = [];
+            fileInput.value = '';
+            renderFileList();
+            mergeBtn.disabled = true;
+            progress.classList.add('hidden');
+            result.classList.add('hidden');
+        });
+
+        // 核心：合并为PDF
+        mergeBtn.addEventListener('click', async () => {
+            if (fileList.length === 0) return;
+            
+            mergeBtn.disabled = true;
+            progress.classList.remove('hidden');
+            result.classList.add('hidden');
+
+            try {
+                const pdfDoc = await PDFDocument.create();
+                
+                for (const file of fileList) {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    const fileBytes = await readFileAsArrayBuffer(file);
+                    
+                    if (ext === 'pdf') {
+                        // 合并PDF
+                        const externalPdf = await PDFDocument.load(fileBytes);
+                        const pages = await pdfDoc.copyPages(externalPdf, externalPdf.getPageIndices());
+                        pages.forEach(page => pdfDoc.addPage(page));
+                    } else if (ext === 'docx') {
+                        // 转换Word(docx)
+                        await convertDocxToPdf(fileBytes, pdfDoc);
+                    } else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+                        // 转换图片
+                        await convertImageToPdf(fileBytes, ext, pdfDoc);
+                    }
+                }
+
+                // 保存PDF
+                finalPdfBytes = await pdfDoc.save();
+                progress.classList.add('hidden');
+                result.classList.remove('hidden');
+            } catch (error) {
+                alert('处理失败：' + error.message);
+                progress.classList.add('hidden');
+                mergeBtn.disabled = false;
+            }
+        });
+
+        // 文件读取工具
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Word转PDF
+        async function convertDocxToPdf(arrayBuffer, pdfDoc) {
+            const { jsPDF } = jspdf;
+            const doc = new jsPDF();
+            const array = new Uint8Array(arrayBuffer);
+            
+            const result = await mammoth.convertToHtml({ arrayBuffer: array });
+            const html = result.value;
+            
+            doc.html(html, {
+                callback: () => {
+                    const pdfBytes = doc.output('arraybuffer');
+                    addPdfBytesToDoc(pdfBytes, pdfDoc);
+                }
+            });
+        }
+
+        // 图片转PDF
+        async function convertImageToPdf(arrayBuffer, ext, pdfDoc) {
+            const imgBase64 = arrayBufferToBase64(arrayBuffer);
+            const page = pdfDoc.addPage();
+            const { width, height } = page.getSize();
+            
+            if (ext === 'jpg' || ext === 'jpeg') {
+                const img = await pdfDoc.embedJpg(arrayBuffer);
+                page.drawImage(img, { x: 0, y: 0, width, height });
+            } else {
+                const img = await pdfDoc.embedPng(arrayBuffer);
+                page.drawImage(img, { x: 0, y: 0, width, height });
+            }
+        }
+
+        // 辅助函数
+        function arrayBufferToBase64(buffer) {
+            let binary = '';
+            const bytes = new Uint8Array(buffer);
+            bytes.forEach(b => binary += String.fromCharCode(b));
+            return window.btoa(binary);
+        }
+
+        async function addPdfBytesToDoc(pdfBytes, targetDoc) {
+            const tempDoc = await PDFDocument.load(pdfBytes);
+            const pages = await targetDoc.copyPages(tempDoc, tempDoc.getPageIndices());
+            pages.forEach(page => targetDoc.addPage(page));
+        }
+
+        // 下载PDF
+        downloadBtn.addEventListener('click', () => {
+            const blob = new Blob([finalPdfBytes], { type: 'application/pdf' });
+            saveAs(blob, `合并文档_${new Date().getTime()}.pdf`);
+        });
+    </script>
 </body>
 </html>
